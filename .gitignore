@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+.DS_Store
+
+# secrets
+.env
+
+# data and generated outputs (reproducible from the CLI)
+data/raw/
+data/processed/
+data/calendar/releases_synthetic.csv
+reports/trade_logs/
+reports/data_quality/

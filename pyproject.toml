@@ -1,0 +1,93 @@
+[project]
+name = "halftick"
+version = "0.1.0"
+description = "Queue-aware execution research: cross the spread or wait in line, in large-tick futures markets."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Janhavi Chavada" }]
+dependencies = [
+    "databento",
+    "python-dotenv",
+    "polars",
+    "numpy",
+    "numba",
+    "pyarrow",
+    "duckdb",
+    "pandas",
+    "scikit-learn",
+    "lightgbm",
+    "statsmodels",
+    "scipy",
+    "matplotlib",
+    "typer",
+    "pydantic>=2",
+    "pyyaml",
+    "structlog",
+    "prometheus-client",
+]
+
+[project.scripts]
+halftick = "halftick.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "hypothesis",
+    "ruff",
+    "mypy",
+    "pre-commit",
+    "types-PyYAML",
+]
+explore = ["jupyterlab"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/halftick"]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF"]
+ignore = ["N803", "N806", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["N802"]
+# numba kernels: keep explicit comparisons that compile predictably
+"src/halftick/sim/kernel.py" = ["SIM102", "SIM109"]
+
+[tool.mypy]
+python_version = "3.12"
+files = [
+    "src/halftick/book",
+    "src/halftick/features",
+    "src/halftick/sim",
+    "src/halftick/replay",
+]
+ignore_missing_imports = true
+disallow_untyped_defs = true
+warn_unused_ignores = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["numba.*", "lightgbm.*", "databento.*", "sklearn.*", "statsmodels.*", "scipy.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["slow: longer end-to-end tests"]
+
+[tool.coverage.run]
+source = ["src/halftick"]
+omit = ["src/halftick/cli.py"]

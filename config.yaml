@@ -1,0 +1,212 @@
+# Halftick configuration. Every tunable number lives here; code reads it via
+# halftick.config.load_config(). CLI flags can override individual keys.
+
+# "synthetic" generates order-book days with halftick.data.synthetic.
+# "databento" reads cached GLBX.MDP3 files from data/raw (needs DATABENTO_API_KEY).
+data_source: synthetic
+
+paths:
+  raw: data/raw
+  processed: data/processed
+  calendar: data/calendar
+  reports: reports
+  figures: reports/figures
+  tables: reports/tables
+  trade_logs: reports/trade_logs
+  data_quality: reports/data_quality
+
+instruments:
+  ZN:
+    databento_symbol: ZN.v.0
+    tick_size: 0.015625      # 1/2 of 1/32 of a point
+    tick_value_usd: 15.625
+    contract_multiplier: 1000
+  ES:
+    databento_symbol: ES.v.0
+    tick_size: 0.25
+    tick_value_usd: 12.5
+    contract_multiplier: 50
+
+primary_instrument: ZN
+comparison_instrument: ES
+
+fees:
+  per_side_usd: 2.50          # exchange + clearing + broker, all-in
+  sensitivity_usd: [1.00, 2.50, 4.00]
+
+session:
+  timezone: America/New_York
+  start: "08:30"
+  end: "15:00"
+  release_window_minutes: 5   # +/- minutes around scheduled macro releases
+  time_of_day_buckets:        # minutes since 08:30 ET, used by diagnostics
+    open: [0, 90]
+    midday: [90, 300]
+    close: [300, 390]
+
+databento:
+  dataset: GLBX.MDP3
+  stype_in: continuous
+  budget_usd: 100.0
+  spend_ledger: data/raw/spend_ledger.json
+  api_key_env: DATABENTO_API_KEY
+
+quality:
+  max_gap_seconds: 2.0
+
+roll:
+  # A day counts as a roll day when the front contract holds less than this
+  # share of total daily volume across contracts, or when the front contract
+  # changed within roll_buffer_days.
+  min_front_share: 0.85
+  roll_buffer_days: 1
+
+book:
+  depth_levels: 10
+  price_window_ticks: 16384   # size of the dense price array in the numba book
+
+features:
+  windows_ms: [100, 1000, 5000]
+  windows_events: [10, 50, 200]
+  depth_levels: [3, 5, 10]
+  vol_windows_s: [30, 300]
+
+targets:
+  horizons_s: [1, 5, 30]
+
+models:
+  sample_rows_per_day: 150000
+  imbalance_bins: 10
+  laplace_alpha: 1.0
+  min_train_days: 5
+  calibration: isotonic
+  logistic_features: [imbalance, microprice, ofi_ev50]
+  lightgbm:
+    n_estimators: 300
+    learning_rate: 0.05
+    num_leaves: 31
+    min_child_samples: 200
+    subsample: 0.8
+    subsample_freq: 1
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    verbose: -1
+  reliability_bins: 15
+  hac_lags: 50
+
+sim:
+  decisions_per_day: 2000
+  deadlines_s: [5, 15, 30]
+  latencies_ms: [0, 1, 10, 100]
+  queue_models: [pessimistic, proportional, optimistic, exact]
+  checkpoint_ms: 250
+  headline:
+    queue_model: proportional
+    latency_ms: 10
+    deadline_s: 15
+  new_level_max_queue_frac: 0.25   # join a fresh level only if it is this small vs the median queue
+  direction_thresholds: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80]
+  cost_model_margin_ticks: 0.0
+  cost_model_rows_per_day: 60000
+  cost_model:
+    n_estimators: 200
+    learning_rate: 0.05
+    num_leaves: 31
+    min_child_samples: 200
+    subsample: 0.8
+    subsample_freq: 1
+    colsample_bytree: 0.8
+    verbose: -1
+  walk_forward:
+    min_train_days: 8
+    test_block_days: 3
+  bootstrap_reps: 2000
+  adverse_horizons_s: [1, 5]
+
+diagnostics:
+  vol_feature: vol_300s
+  queue_feature: own_queue
+
+monitoring:
+  metrics_port: 8000
+  feature_latency_alert_ms: 5
+  no_data_alert_seconds: 5
+
+synthetic:
+  seed: 20260817
+  start_date: "2026-08-17"
+  generate_from: "08:00"      # ET; wider than the session so the filter does real work
+  generate_to: "15:15"
+  holidays: ["2026-09-07"]    # Labor Day
+  quality_faults:
+    duplicate_rate: 0.00001
+    sequence_gap_rate: 0.00001
+    outage_probability_per_day: 0.3
+    outage_seconds: [3, 8]
+  releases:                   # synthetic scheduled events; shocks are injected at these times
+    - {day_index: 3, time: "08:30", event: "Synthetic CPI"}
+    - {day_index: 9, time: "08:30", event: "Synthetic NFP"}
+    - {day_index: 13, time: "14:00", event: "Synthetic FOMC"}
+    - {day_index: 17, time: "10:00", event: "Synthetic ISM"}
+  release_shock:
+    activity_multiplier: 4.0
+    decay_seconds: 120
+    signal_jump: 2.5
+  roll:
+    first_roll_day_index: 6   # volume shifts to the next contract over roll_days days
+    roll_days: 3
+  instruments:
+    ZN:
+      n_days: 22
+      instrument_ids: [42005804, 42008467]
+      raw_symbols: [ZNU6, ZNZ6]
+      start_price: 112.0
+      levels: 12
+      queue_target: 700
+      deep_queue_target: 900
+      add_rate: 3.5           # limit adds per second at the best level
+      deep_add_rate: 0.4
+      cancel_rate: 2.6        # cancels per second at the best level when queue = target
+      cancel_queue_power: 0.3
+      market_rate: 1.2        # market orders per second per side
+      inside_rate: 25.0       # rate of orders improving a 2-tick spread
+      add_size_mean: 50.0
+      cancel_size_mean: 50.0
+      market_size_mean: 40.0
+      market_big_prob: 0.05
+      market_big_mean: 250.0
+      new_level_size_mean: 25.0
+      refill_boost: 1.0
+      signal_tau_s: 20.0
+      signal_vol: 0.35
+      signal_market_kappa: 0.55
+      signal_limit_kappa: 0.25
+      cancel_back_skew: 0.35
+      continue_prob: 0.6      # after a depletion, chance the vacated level is taken by the other side
+    ES:
+      n_days: 8
+      instrument_ids: [5002, 5010]
+      raw_symbols: [ESU6, ESZ6]
+      start_price: 6500.0
+      levels: 12
+      queue_target: 35
+      deep_queue_target: 60
+      add_rate: 8.0
+      deep_add_rate: 0.6
+      cancel_rate: 6.0
+      cancel_queue_power: 0.2
+      market_rate: 2.5
+      inside_rate: 40.0
+      add_size_mean: 4.0
+      cancel_size_mean: 4.0
+      market_size_mean: 4.0
+      market_big_prob: 0.04
+      market_big_mean: 25.0
+      new_level_size_mean: 4.0
+      refill_boost: 1.0
+      signal_tau_s: 10.0
+      signal_vol: 0.45
+      signal_market_kappa: 0.5
+      signal_limit_kappa: 0.2
+      cancel_back_skew: 0.35
+      continue_prob: 0.6
