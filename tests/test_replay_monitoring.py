@@ -159,3 +159,12 @@ def test_playback_ignores_orders_before_a_mid_day_start(cfg: Settings, tmp_path:
     text = generate_latest(m.registry).decode()
     assert 'halftick_sim_orders_total{instrument="ZN",strategy="always_cross"} 1.0' in text
     assert 'halftick_sim_completed_total{instrument="ZN",strategy="always_cross"} 1.0' in text
+
+
+def test_logging_still_works_after_a_cli_run(tmp_path: Path) -> None:
+    """The CLI swaps stderr; loggers must not keep a handle to the closed stream."""
+    from halftick.log import get_logger
+
+    r = CliRunner().invoke(app, ["--config", str(ROOT / "config.yaml"), "replay", "--help"])
+    assert r.exit_code == 0
+    get_logger("after_cli").info("still_logging")

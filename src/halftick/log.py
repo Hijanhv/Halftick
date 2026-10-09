@@ -9,6 +9,10 @@ from typing import Any
 import structlog
 
 
+def _stderr_logger(*_args: Any) -> structlog.PrintLogger:
+    return structlog.PrintLogger(file=sys.stderr)
+
+
 def configure_logging(level: str = "INFO", json: bool = True) -> None:
     logging.basicConfig(stream=sys.stderr, level=level.upper(), format="%(message)s")
     renderer: Any = structlog.processors.JSONRenderer() if json else structlog.dev.ConsoleRenderer()
@@ -20,7 +24,9 @@ def configure_logging(level: str = "INFO", json: bool = True) -> None:
             renderer,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelName(level.upper())),
-        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+        # Resolve sys.stderr at every call, not once at setup: if stderr is
+        # swapped (test runners, CLI capture) a cached handle may already be closed.
+        logger_factory=_stderr_logger,
         cache_logger_on_first_use=False,
     )
 
