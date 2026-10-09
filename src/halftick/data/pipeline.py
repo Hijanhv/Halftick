@@ -147,7 +147,7 @@ def build_day(cfg: Settings, instrument: str, date: dt.date) -> Path:
         )
     )
     path = out_dir / "features.parquet"
-    out.write_parquet(path)
+    compact(out).write_parquet(path)
     log.info(
         "day_built",
         instrument=instrument,
@@ -158,6 +158,23 @@ def build_day(cfg: Settings, instrument: str, date: dt.date) -> Path:
         total_seconds=round(time.perf_counter() - t_start, 2),
     )
     return path
+
+
+def compact(frame: pl.DataFrame) -> pl.DataFrame:
+    """Shrink a day for storage: float32 features, int32 prices and sizes.
+
+    Sizes are lots and trade prices are integer ticks, both far below 2**31, and the
+    features do not need more than float32 precision. Timestamps stay int64.
+    Readers cast back to 64-bit before any numba kernel runs.
+    """
+    casts = []
+    for name, dtype in frame.schema.items():
+        if dtype == pl.Float64 and name != "mid":
+            casts.append(pl.col(name).cast(pl.Float32))
+        elif dtype == pl.Int64 and name not in ("ts_event", "sequence", "bid_px", "ask_px"):
+            # bid_px / ask_px keep int64: the empty-side sentinels do not fit in int32
+            casts.append(pl.col(name).cast(pl.Int32))
+    return frame.with_columns(casts)
 
 
 def load_features(

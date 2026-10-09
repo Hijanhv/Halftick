@@ -36,7 +36,7 @@ def tiny(tmp_path_factory: pytest.TempPathFactory):  # type: ignore[no-untyped-d
         "synthetic.generate_from='08:20'",
         "synthetic.generate_to='09:00'",
         "session.end='08:58'",
-        "synthetic.roll.first_roll_day_index=50",
+        "synthetic.instruments.ZN.roll_day_index=50",
         "synthetic.releases=[{day_index: 4, time: '08:40', event: Test release}]",
         "models.min_train_days=2",
         "models.sample_rows_per_day=4000",

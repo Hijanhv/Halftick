@@ -153,11 +153,11 @@ synthetic:
     decay_seconds: 120
     signal_jump: 2.5
   roll:
-    first_roll_day_index: 6   # volume shifts to the next contract over roll_days days
-    roll_days: 3
+    roll_days: 3              # volume shifts to the next contract over this many days
   instruments:
     ZN:
       n_days: 22
+      roll_day_index: 6       # late August, like the real ZN Sep->Dec roll
       instrument_ids: [42005804, 42008467]
       raw_symbols: [ZNU6, ZNZ6]
       start_price: 112.0
@@ -184,7 +184,8 @@ synthetic:
       cancel_back_skew: 0.35
       continue_prob: 0.6      # after a depletion, chance the vacated level is taken by the other side
     ES:
-      n_days: 8
+      n_days: 11              # limited by free disk on the dev machine; synthetic data is free
+      roll_day_index: 18      # mid September, outside the generated window
       instrument_ids: [5002, 5010]
       raw_symbols: [ESU6, ESZ6]
       start_price: 6500.0

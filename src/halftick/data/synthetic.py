@@ -410,23 +410,27 @@ def _seed(base: int, instrument: str, date: dt.date) -> int:
     return int(digest[:8], 16)
 
 
-def front_contract_index(cfg: Settings, day_index: int) -> int:
-    """Which of the two synthetic contracts is front by volume on this day."""
-    r = cfg.synthetic.roll
-    return 0 if day_index < r.first_roll_day_index + (r.roll_days + 1) // 2 else 1
+def volume_shares(cfg: Settings, instrument: str, day_index: int) -> tuple[float, float]:
+    """Synthetic daily volume split between the expiring and the next contract.
 
-
-def volume_shares(cfg: Settings, day_index: int) -> tuple[float, float]:
-    """Synthetic daily volume split between the expiring and the next contract."""
-    r = cfg.synthetic.roll
-    k = day_index - r.first_roll_day_index
+    Volume migrates over roll_days days starting at the instrument's roll day
+    (ZN rolls in late August, ES in mid September, as in the real calendar).
+    """
+    days = cfg.synthetic.roll.roll_days
+    k = day_index - cfg.synthetic.instruments[instrument].roll_day_index
     if k < 0:
         old = 0.97
-    elif k < r.roll_days:
-        old = 0.75 - 0.5 * k / max(r.roll_days - 1, 1)
+    elif k < days:
+        old = 0.75 - 0.55 * k / max(days - 1, 1)
     else:
         old = 0.03
     return old, 1.0 - old
+
+
+def front_contract_index(cfg: Settings, instrument: str, day_index: int) -> int:
+    """Which of the two synthetic contracts is front by volume on this day."""
+    old, new = volume_shares(cfg, instrument, day_index)
+    return 0 if old >= new else 1
 
 
 def generate_day(
@@ -491,7 +495,7 @@ def generate_day(
     faults["sequence_gaps"] = int(gaps.sum())
 
     contracts = sp.instrument_ids
-    front = front_contract_index(cfg, day_index)
+    front = front_contract_index(cfg, instrument, day_index)
     events = pl.DataFrame(
         {
             "ts_event": ts,
@@ -552,7 +556,7 @@ def generate_dataset(cfg: Settings, instrument: str, n_days: int | None = None) 
         }
         (out / "meta.json").write_text(json.dumps(meta, indent=2))
         traded = int(day.events.filter(pl.col("action") == TRADE)["size"].sum())
-        old, new = volume_shares(cfg, i)
+        old, new = volume_shares(cfg, instrument, i)
         for cid, sym, share in zip(sp.instrument_ids, sp.raw_symbols, (old, new), strict=True):
             volume_rows.append(
                 {

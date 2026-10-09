@@ -154,12 +154,12 @@ class ReleaseShock(_Strict):
 
 
 class SyntheticRoll(_Strict):
-    first_roll_day_index: int = Field(ge=0)
     roll_days: int = Field(ge=1)
 
 
 class SyntheticInstrument(_Strict):
     n_days: int = Field(ge=1)
+    roll_day_index: int = Field(ge=0)
     instrument_ids: tuple[int, int]
     raw_symbols: tuple[str, str]
     start_price: float = Field(gt=0)
