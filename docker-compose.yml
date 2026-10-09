@@ -1,0 +1,45 @@
+# One-command demo: replay a trading day at market speed and watch it in Grafana.
+#   docker compose up --build
+#   Grafana:    http://localhost:3000  (dashboard "Halftick replay", no login needed)
+#   Prometheus: http://localhost:9090  (alerts under /alerts)
+# If ./data holds processed days the replay uses them (and the simulated trade
+# log for that day); otherwise it generates a synthetic day in memory.
+services:
+  app:
+    build: .
+    command: ["replay", "--realtime", "--speed", "${HALFTICK_SPEED:-1}", "--metrics-port", "8000",
+              "--start", "${HALFTICK_START:-09:30}", "--loop"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data:ro
+      - ./reports:/app/reports:ro
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - app
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/halftick.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus

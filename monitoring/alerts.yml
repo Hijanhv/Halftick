@@ -1,0 +1,48 @@
+groups:
+  - name: halftick
+    rules:
+      # No market data for more than 5 s while the replay clock is inside the day
+      # session. The synthetic days contain injected feed outages of 3-8 s, so
+      # this alert fires for real during a live replay.
+      - alert: HalftickNoMarketData
+        expr: |
+          (time() - max by (instrument) (halftick_last_event_wall_timestamp_seconds)) > 5
+          and on (instrument) max by (instrument) (halftick_in_session) == 1
+        labels:
+          severity: critical
+        annotations:
+          summary: "No market data for over 5 s during the session ({{ $labels.instrument }})"
+
+      - alert: HalftickReplayDown
+        expr: up{job="halftick"} == 0
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Replay engine metrics endpoint is down"
+
+      - alert: HalftickCrossedBook
+        expr: increase(halftick_data_quality_errors_total{check="crossed_book"}[1m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Crossed book detected ({{ $labels.instrument }})"
+
+      # Threshold mirrors monitoring.feature_latency_alert_ms in config.yaml (5 ms).
+      - alert: HalftickFeatureLatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le, instrument) (rate(halftick_feature_latency_seconds_bucket[1m]))) > 0.005
+        for: 15s
+        labels:
+          severity: warning
+        annotations:
+          summary: "p99 feature computation latency above 5 ms ({{ $labels.instrument }})"
+
+      - alert: HalftickReplayLagging
+        expr: halftick_replay_lag_seconds > 1
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Replay is more than 1 s behind schedule ({{ $labels.instrument }})"
