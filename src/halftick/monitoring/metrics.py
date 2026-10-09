@@ -198,6 +198,8 @@ class TradeLogPlayback:
         self.ends = df.sort("exec_ts")
         self._si = 0
         self._ei = 0
+        self._started = False
+        self._skipped_ts = 0
         self._totals: dict[str, list[float]] = {}
         self._start_ts = self.starts["decision_ts"].to_numpy()
         self._start_strat = self.starts["strategy"].to_list()
@@ -210,6 +212,13 @@ class TradeLogPlayback:
     def on_book_update(self, update: BookUpdate) -> None:
         i = self.m.instrument
         t = update.ts_event
+        if not self._started:
+            # The replay may start mid-day (--start 09:30): orders decided before
+            # the first replayed event belong to the part of the day we skipped.
+            self._si = int(np.searchsorted(self._start_ts, t, side="left"))
+            self._ei = int(np.searchsorted(self._end_ts, t, side="left"))
+            self._skipped_ts = t
+            self._started = True
         n = int(np.searchsorted(self._start_ts, t, side="right"))
         for k in range(self._si, n):
             self.m.orders.labels(i, self._start_strat[k]).inc()
@@ -217,6 +226,8 @@ class TradeLogPlayback:
         n = int(np.searchsorted(self._end_ts, t, side="right"))
         for k in range(self._ei, n):
             row = self._end_rows[k]
+            if row["decision_ts"] < self._skipped_ts:
+                continue  # started before the replay window; never shown as started
             s = row["strategy"]
             tot = self._totals.setdefault(s, [0.0, 0.0, 0.0])
             tot[0] += row["cost_ticks"]

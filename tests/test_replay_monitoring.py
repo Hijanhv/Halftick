@@ -134,3 +134,28 @@ def test_cli_synth_and_build(tmp_path: Path) -> None:
         .drop_nans()
         .mean()
     )
+
+
+def test_playback_ignores_orders_before_a_mid_day_start(cfg: Settings, tmp_path: Path) -> None:
+    frame = book_frame(cfg, EVENTS)
+    log = pl.DataFrame(
+        {
+            "queue_model": ["proportional"] * 3,
+            "latency_ms": [10] * 3,
+            "deadline_s": [15] * 3,
+            "strategy": ["always_cross"] * 3,
+            "decision_ts": [0, 0, NS // 5],  # two orders before the replay starts, one after
+            "exec_ts": [NS // 20, NS // 5, NS // 5],
+            "filled_passive": [False] * 3,
+            "cost_ticks": [0.5] * 3,
+            "cost_usd": [10.3] * 3,
+        }
+    )
+    lp = tmp_path / "log.parquet"
+    log.write_parquet(lp)
+    m = ReplayMetrics("ZN")
+    pb = TradeLogPlayback(m, lp, "proportional", 10, 15)
+    ReplayEngine(FrameSource(frame), [pb], observer=m, start_ns=NS // 10).run()
+    text = generate_latest(m.registry).decode()
+    assert 'halftick_sim_orders_total{instrument="ZN",strategy="always_cross"} 1.0' in text
+    assert 'halftick_sim_completed_total{instrument="ZN",strategy="always_cross"} 1.0' in text
