@@ -389,20 +389,28 @@ def evaluate_day(
     # oracle (UPPER BOUND: uses future information)
     add("oracle", oracle_cost(r), "oracle_upper_bound", nan, nan, np.zeros(n, bool), nan, day.t0)
 
-    fee = cfg.fees.per_side_usd
-    # "Not applicable" values (no passive fill, no resting order) are stored as
-    # nulls, not NaN: SQL aggregates skip nulls but propagate NaN.
-    not_applicable = [
-        "entry_px_ticks",
-        "queue_ahead_at_entry",
-        "fill_px_ticks",
-        "adverse_1s",
-        "adverse_5s",
-    ]
-    return pl.concat(rows).with_columns(
-        pl.lit(fee).alias("fee_usd"),
-        (pl.col("cost_ticks") * spec.tick_value_usd + fee).alias("cost_usd"),
-        *[pl.col(c).fill_nan(None) for c in not_applicable],
+    return finalize_trade_log(pl.concat(rows), spec.tick_value_usd, cfg.fees.per_side_usd)
+
+
+# "Not applicable" values (no passive fill, no resting order) are stored as
+# nulls, not NaN: SQL aggregates skip nulls but propagate NaN.
+NOT_APPLICABLE = [
+    "entry_px_ticks",
+    "queue_ahead_at_entry",
+    "fill_px_ticks",
+    "adverse_1s",
+    "adverse_5s",
+]
+
+
+def finalize_trade_log(
+    log_rows: pl.DataFrame, tick_value_usd: float, fee_per_side_usd: float
+) -> pl.DataFrame:
+    """Add fees and dollar costs. One contract per order means exactly one fee per order."""
+    return log_rows.with_columns(
+        pl.lit(fee_per_side_usd).alias("fee_usd"),
+        (pl.col("cost_ticks") * tick_value_usd + fee_per_side_usd).alias("cost_usd"),
+        *[pl.col(c).fill_nan(None) for c in NOT_APPLICABLE],
     )
 
 

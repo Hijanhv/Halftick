@@ -185,6 +185,16 @@ def to_ticks(fixed: npt.NDArray[np.int64], tick_size: float, empty: int) -> npt.
     return out
 
 
+def _char(x: object) -> str:
+    """Databento stores action/side as one-byte chars; numpy may hand them over as
+    bytes (b"A"), ints (65) or str ("A") depending on the dtype."""
+    if isinstance(x, (bytes, np.bytes_)):
+        return x.decode()
+    if isinstance(x, (int, np.integer)):
+        return chr(int(x))
+    return str(x)
+
+
 def mbp_to_book_frame(records: npt.NDArray[Any], tick_size: float, levels: int) -> pl.DataFrame:
     """Turn an mbp-1 or mbp-10 structured array into the canonical book frame.
 
@@ -211,20 +221,8 @@ def mbp_to_book_frame(records: npt.NDArray[Any], tick_size: float, levels: int) 
         oka = (ap != NO_ASK) & (ao >= 0) & (ao < levels)
         bid_grid[rows[okb], bo[okb]] = bs[okb]
         ask_grid[rows[oka], ao[oka]] = asz[oka]
-    actions = np.array(
-        [
-            ACTION_MAP.get(chr(a) if isinstance(a, (int, np.integer)) else str(a), MODIFY)
-            for a in records["action"]
-        ],
-        dtype=np.int8,
-    )
-    sides = np.array(
-        [
-            SIDE_MAP.get(chr(s) if isinstance(s, (int, np.integer)) else str(s), NONE)
-            for s in records["side"]
-        ],
-        dtype=np.int8,
-    )
+    actions = np.array([ACTION_MAP.get(_char(a), MODIFY) for a in records["action"]], dtype=np.int8)
+    sides = np.array([SIDE_MAP.get(_char(s), NONE) for s in records["side"]], dtype=np.int8)
     frame: dict[str, Any] = {
         "ts_event": records["ts_event"].astype(np.int64),
         "sequence": records["sequence"].astype(np.int64),
