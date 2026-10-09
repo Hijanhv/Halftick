@@ -21,6 +21,18 @@ from halftick import plots
 from halftick.config import Settings
 from halftick.sim.policy import STRATEGIES
 
+
+def query(sql: str) -> pl.DataFrame:
+    """Run a DuckDB query single-threaded.
+
+    Parallel aggregation adds floats in a varying order, so the last digit of a
+    mean can change between runs. One thread makes every committed table
+    reproducible bit for bit; on these data sizes it costs a second or two.
+    """
+    with duckdb.connect(config={"threads": 1}) as con:
+        return con.sql(sql).pl()
+
+
 COMPARE = ("model_cost", "model_direction", "always_post", "new_level", "oracle")
 
 
@@ -47,7 +59,7 @@ def cost_table(cfg: Settings, instrument: str) -> pl.DataFrame:
         WHERE NOT in_release_window
         GROUP BY ALL ORDER BY ALL
     """
-    return duckdb.sql(q).pl()
+    return query(q)
 
 
 def paired(cfg: Settings, instrument: str, release: bool = False) -> pl.DataFrame:
@@ -62,7 +74,7 @@ def paired(cfg: Settings, instrument: str, release: bool = False) -> pl.DataFram
         GROUP BY date, decision_id, decision_ts, queue_model, latency_ms, deadline_s,
                  minutes_since_open, vol_300s, own_queue, spread_ticks
     """
-    return duckdb.sql(q).pl().sort(["queue_model", "latency_ms", "deadline_s", "decision_ts"])
+    return query(q).sort(["queue_model", "latency_ms", "deadline_s", "decision_ts"])
 
 
 def day_block_bootstrap(
@@ -82,7 +94,9 @@ def hac_t(diff: np.ndarray, lags: int) -> float:
     if len(diff) < 3 or np.allclose(diff, diff[0]):
         return float("nan")
     res = sm.OLS(diff, np.ones_like(diff)).fit(cov_type="HAC", cov_kwds={"maxlags": lags})
-    return float(res.tvalues[0])
+    # Multi-threaded linear algebra leaves ~1e-12 noise; 6 decimals is plenty
+    # for a t-statistic and keeps committed tables identical between runs.
+    return round(float(res.tvalues[0]), 6)
 
 
 def savings_table(cfg: Settings, instrument: str, wide: pl.DataFrame | None = None) -> pl.DataFrame:

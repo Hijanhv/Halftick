@@ -60,7 +60,12 @@ def _columns(cfg: Settings) -> list[str]:
 def hac_mean_test(diff: F64, lags: int) -> tuple[float, float, float]:
     """Mean of a loss difference with a Newey-West standard error. Returns (mean, se, t)."""
     res = sm.OLS(diff, np.ones_like(diff)).fit(cov_type="HAC", cov_kwds={"maxlags": lags})
-    return float(res.params[0]), float(res.bse[0]), float(res.tvalues[0])
+    # rounded: multi-threaded BLAS leaves ~1e-12 run-to-run noise
+    return (
+        round(float(res.params[0]), 9),
+        round(float(res.bse[0]), 9),
+        round(float(res.tvalues[0]), 6),
+    )
 
 
 def run_direction_walk_forward(cfg: Settings, instrument: str) -> pl.DataFrame:

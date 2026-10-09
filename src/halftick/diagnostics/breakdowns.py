@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import duckdb
 import numpy as np
 import polars as pl
 from sklearn.metrics import roc_auc_score
@@ -23,7 +22,7 @@ from halftick import plots
 from halftick.config import Settings
 from halftick.data.pipeline import analysis_days, load_features, roll_table
 from halftick.log import get_logger
-from halftick.sim.summary import paired, trade_log_glob
+from halftick.sim.summary import paired, query, trade_log_glob
 
 log = get_logger(__name__)
 
@@ -215,35 +214,40 @@ def stability(cfg: Settings, instrument: str) -> pl.DataFrame:
           AND latency_ms = {h.latency_ms} AND deadline_s = {h.deadline_s}
         GROUP BY ALL ORDER BY ALL
     """
-    daily = duckdb.sql(q).pl()
+    daily = query(q)
     daily.write_csv(cfg.paths.tables / f"diag_daily_costs_{instrument}.csv")
     fig, axes = plots.plt.subplots(1, 2, figsize=(11, 4))
     ax = axes[0]
+    # Days are categories: plot at positions and label the ticks explicitly.
+    test_days = sorted(folds["test_day"].unique().to_list())
     for m in ("baseline_a", "baseline_b", "lightgbm"):
         g = folds.filter(pl.col("model") == m)
         ax.plot(
-            g["test_day"].to_list(),
+            [test_days.index(d) for d in g["test_day"].to_list()],
             g["auc"].to_list(),
             marker="o",
             ms=4,
             color=plots.color(m),
             label=m.replace("_", " "),
         )
+    ax.set_xticks(range(len(test_days)), test_days)
     ax.set_title(f"{instrument}: direction AUC by test day")
     ax.set_ylabel("AUC")
     ax.tick_params(axis="x", rotation=60)
     ax.legend()
     ax = axes[1]
+    cost_days = sorted(str(d) for d in daily["date"].unique().to_list())
     for s in ("always_cross", "always_post", "model_direction", "model_cost", "new_level"):
         g = daily.filter(pl.col("strategy") == s).sort("date")
         ax.plot(
-            [str(d) for d in g["date"].to_list()],
+            [cost_days.index(str(d)) for d in g["date"].to_list()],
             g["mean_cost"].to_list(),
             marker="o",
             ms=4,
             color=plots.color(s),
             label=s.replace("_", " "),
         )
+    ax.set_xticks(range(len(cost_days)), cost_days)
     ax.set_title("Mean cost by test day (headline cell)")
     ax.set_ylabel("ticks per contract")
     ax.tick_params(axis="x", rotation=60)
@@ -272,7 +276,7 @@ def queue_model_validation(cfg: Settings, instrument: str) -> pl.DataFrame:
         FROM p JOIN t USING (date, decision_id, latency_ms, deadline_s)
         GROUP BY ALL ORDER BY p.queue_model, p.latency_ms, p.deadline_s
     """
-    out = duckdb.sql(q).pl()
+    out = query(q)
     out.write_csv(cfg.paths.tables / f"queue_validation_{instrument}.csv")
     return out
 
