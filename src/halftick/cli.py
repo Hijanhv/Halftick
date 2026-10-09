@@ -101,14 +101,31 @@ def download(
 def build_features(
     instrument: InstOpt = "ZN",
     date: Annotated[str | None, typer.Option(help="Only this day")] = None,
+    drop_events: Annotated[
+        bool,
+        typer.Option(
+            "--drop-events",
+            help="Delete synthetic events.parquet after a successful build (regenerate with synth)",
+        ),
+    ] = False,
 ) -> None:
     """Validate, rebuild the book, and compute features and targets for stored days."""
-    from halftick.data.pipeline import available_days, build_day
+    import json
+
+    from halftick.data.pipeline import available_days, build_day, day_dir
     from halftick.data.quality import write_markdown_summary
 
     days = [dt.date.fromisoformat(date)] if date else available_days(cfg(), instrument)
     for d in days:
         build_day(cfg(), instrument, d)
+        meta = day_dir(cfg(), instrument, d) / "meta.json"
+        if (
+            drop_events
+            and meta.exists()
+            and json.loads(meta.read_text()).get("source") == "synthetic"
+        ):
+            # Synthetic events are a pure function of the seed, so this only saves disk.
+            (day_dir(cfg(), instrument, d) / "events.parquet").unlink(missing_ok=True)
     write_markdown_summary(cfg().paths.data_quality)
 
 
@@ -187,10 +204,20 @@ def replay(
     elif synthetic:
         day = dt.date.fromisoformat(c.synthetic.start_date)
     else:
-        days = available_days(c, instrument, "features.parquet")
-        if not days:
-            raise typer.BadParameter("no processed days; run build-features or use --synthetic")
-        day = days[0]
+        # Prefer a day with a simulated trade log so the dashboard shows the
+        # research orders; then any processed day; then generate one in memory.
+        processed = available_days(c, instrument, "features.parquet")
+        logged = [
+            d
+            for d in processed
+            if (c.paths.trade_logs / instrument / f"{d.isoformat()}.parquet").exists()
+        ]
+        if logged or processed:
+            day = (logged or processed)[0]
+        else:
+            synthetic = True
+            day = dt.date.fromisoformat(c.synthetic.start_date)
+            log.info("replay_fallback_synthetic", reason="no processed days found")
     metrics = ReplayMetrics(
         instrument,
         session_bounds_ns=session_bounds_ns(c, day),
@@ -234,7 +261,7 @@ def run_all_cmd() -> None:
     for inst in (c.primary_instrument, c.comparison_instrument):
         if c.data_source == "synthetic":
             synth(inst)
-        build_features(inst)
+        build_features(inst, drop_events=c.data_source == "synthetic")
         train(inst)
         simulate(inst)
         diagnose(inst)

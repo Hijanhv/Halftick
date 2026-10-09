@@ -65,6 +65,8 @@ ignore = ["N803", "N806", "RUF001", "RUF002", "RUF003"]
 "tests/*" = ["N802"]
 # numba kernels: keep explicit comparisons that compile predictably
 "src/halftick/sim/kernel.py" = ["SIM102", "SIM109"]
+# the report is mostly a Markdown template: prose lines stay unwrapped
+"src/halftick/report.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

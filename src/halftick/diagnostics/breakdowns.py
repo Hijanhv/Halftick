@@ -263,62 +263,70 @@ def queue_model_validation(cfg: Settings, instrument: str) -> pl.DataFrame:
     return out
 
 
-def descriptive(cfg: Settings, instruments: list[str]) -> pl.DataFrame:
+def descriptive_instrument(cfg: Settings, instrument: str) -> pl.DataFrame:
+    """Per-day book statistics for one instrument, plus a queue-size sample for the figure.
+
+    Saved per instrument so the processed days can be deleted afterwards
+    (they are reproducible from the seed) without losing the statistics.
+    """
     rows = []
+    queues = []
+    cols = ["in_session", "spread", "bid_queue", "ask_queue", "mid", "action", "ts_event"]
+    for d in analysis_days(cfg, instrument):
+        f = load_features(cfg, instrument, d, columns=cols).filter("in_session")
+        mid = f["mid"].to_numpy()
+        changes = int(np.sum(np.diff(mid) != 0))
+        hours = (f["ts_event"][-1] - f["ts_event"][0]) / 3.6e12
+        both = np.concatenate([f["bid_queue"].to_numpy(), f["ask_queue"].to_numpy()])
+        rows.append(
+            {
+                "instrument": instrument,
+                "date": d,
+                "events": f.height,
+                "events_per_s": f.height / (hours * 3600),
+                "spread_1tick_share": float((f["spread"] == 1).mean()),
+                "median_best_queue": float(np.median(both)),
+                "mid_changes": changes,
+                "mid_changes_per_min": changes / (hours * 60),
+                "trades": int((f["action"] == 3).sum()),
+            }
+        )
+        queues.append(f["bid_queue"].to_numpy()[::50])
+    out = pl.DataFrame(rows)
+    cfg.paths.tables.mkdir(parents=True, exist_ok=True)
+    out.write_csv(cfg.paths.tables / f"descriptive_{instrument}.csv")
+    if queues:
+        pl.DataFrame({"bid_queue": np.concatenate(queues)}).write_parquet(
+            cfg.paths.tables / f"queue_sample_{instrument}.parquet"
+        )
+    return out
+
+
+def descriptive(cfg: Settings, instruments: list[str]) -> pl.DataFrame:
+    """Combine the per-instrument statistics and draw the queue-size figure."""
+    frames = []
     fig, ax = plots.plt.subplots(figsize=(7.5, 4))
     for inst in instruments:
-        days = analysis_days(cfg, inst)
-        if not days:
+        table = cfg.paths.tables / f"descriptive_{inst}.csv"
+        if not table.exists() and analysis_days(cfg, inst):
+            descriptive_instrument(cfg, inst)
+        if not table.exists():
             continue
-        queues = []
-        for d in days:
-            f = load_features(
-                cfg,
-                inst,
-                d,
-                columns=[
-                    "in_session",
-                    "spread",
-                    "bid_queue",
-                    "ask_queue",
-                    "mid",
-                    "action",
-                    "ts_event",
-                ],
-            ).filter("in_session")
-            mid = f["mid"].to_numpy()
-            changes = int(np.sum(np.diff(mid) != 0))
-            hours = (f["ts_event"][-1] - f["ts_event"][0]) / 3.6e12
-            rows.append(
-                {
-                    "instrument": inst,
-                    "date": d,
-                    "events": f.height,
-                    "events_per_s": f.height / (hours * 3600),
-                    "spread_1tick_share": float((f["spread"] == 1).mean()),
-                    "median_best_queue": float(
-                        np.median(
-                            np.concatenate([f["bid_queue"].to_numpy(), f["ask_queue"].to_numpy()])
-                        )
-                    ),
-                    "mid_changes": changes,
-                    "mid_changes_per_min": changes / (hours * 60),
-                    "trades": int((f["action"] == 3).sum()),
-                }
+        frames.append(pl.read_csv(table))
+        sample = cfg.paths.tables / f"queue_sample_{inst}.parquet"
+        if sample.exists():
+            qq = pl.read_parquet(sample)["bid_queue"].to_numpy()
+            med = float(np.median(qq))
+            ax.hist(
+                qq / med,
+                bins=np.linspace(0, 4, 60),
+                histtype="step",
+                lw=2,
+                density=True,
+                color=plots.color(inst),
+                label=f"{inst} (median {med:.0f} lots)",
             )
-            queues.append(f["bid_queue"].to_numpy()[::50])
-        qq = np.concatenate(queues)
-        med = np.median(qq)
-        ax.hist(
-            qq / med,
-            bins=np.linspace(0, 4, 60),
-            histtype="step",
-            lw=2,
-            density=True,
-            color=plots.color(inst),
-            label=f"{inst} (median {med:.0f} lots)",
-        )
-    out = pl.DataFrame(rows)
+    out = pl.concat(frames) if frames else pl.DataFrame()
     out.write_csv(cfg.paths.tables / "descriptive_days.csv")
     ax.set_xlabel("best-bid queue size / median")
     ax.set_ylabel("density")
@@ -334,4 +342,5 @@ def run_all(cfg: Settings, instrument: str) -> dict[str, Path]:
     signal_decay(cfg, instrument)
     stability(cfg, instrument)
     queue_model_validation(cfg, instrument)
+    descriptive_instrument(cfg, instrument)
     return {"tables": cfg.paths.tables, "figures": cfg.paths.figures}
