@@ -1,0 +1,20 @@
+{
+  "instrument": "ES",
+  "date": "2026-08-18",
+  "source": "synthetic",
+  "n_raw": 1787212,
+  "n_clean": 1787198,
+  "duplicates_removed": 14,
+  "out_of_order_timestamps": 0,
+  "sequence_gaps": 14,
+  "missing_sequence_numbers": 14,
+  "zero_or_negative_sizes": 0,
+  "crossed_book_events": 0,
+  "locked_book_events": 0,
+  "negative_level_after_update": 0,
+  "out_of_price_window": 0,
+  "session_gaps_over_threshold": 0,
+  "longest_session_gap_s": 0.3,
+  "gap_threshold_s": 2.0,
+  "notes": []
+}

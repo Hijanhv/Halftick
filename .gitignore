@@ -17,4 +17,5 @@ data/raw/
 data/processed/
 data/calendar/releases_synthetic.csv
 reports/trade_logs/
-reports/data_quality/
+# large, reproducible with `halftick train`
+reports/tables/direction_predictions_*.parquet

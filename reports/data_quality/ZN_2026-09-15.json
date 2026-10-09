@@ -1,0 +1,20 @@
+{
+  "instrument": "ZN",
+  "date": "2026-09-15",
+  "source": "synthetic",
+  "n_raw": 949303,
+  "n_clean": 949297,
+  "duplicates_removed": 6,
+  "out_of_order_timestamps": 0,
+  "sequence_gaps": 9,
+  "missing_sequence_numbers": 9,
+  "zero_or_negative_sizes": 0,
+  "crossed_book_events": 0,
+  "locked_book_events": 0,
+  "negative_level_after_update": 0,
+  "out_of_price_window": 0,
+  "session_gaps_over_threshold": 0,
+  "longest_session_gap_s": 0.387,
+  "gap_threshold_s": 2.0,
+  "notes": []
+}

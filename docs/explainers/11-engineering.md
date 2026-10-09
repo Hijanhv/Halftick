@@ -26,7 +26,7 @@ structlog writes JSON lines with a level and a timestamp. Library code never pri
 
 ## Tests
 
-66 tests, run on every push. The highlights:
+68 tests, run on every push. The highlights:
 
 * **Order book:** each action type by hand, plus a property-based test (Hypothesis) that checks the book against a dictionary reference model over hundreds of random order flows.
 * **Features:** hand-computed imbalance, microprice and OFI; no-look-ahead tests at several cut points; streaming equals batch.
