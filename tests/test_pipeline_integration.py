@@ -16,6 +16,7 @@ from halftick.data.pipeline import available_days, build_day
 from halftick.data.synthetic import generate_dataset
 from halftick.diagnostics.breakdowns import descriptive, run_all
 from halftick.models.evaluate import run_direction_walk_forward
+from halftick.report import README_END, README_START, build_report
 from halftick.sim.policy import STRATEGIES
 from halftick.sim.runner import run_simulation
 from halftick.sim.summary import write_tables
@@ -130,3 +131,19 @@ def test_queue_validation_table(tiny) -> None:  # type: ignore[no-untyped-def]
 def test_outputs_are_written_under_the_configured_paths(tiny) -> None:  # type: ignore[no-untyped-def]
     cfg, _ = tiny
     assert Path(cfg.paths.tables).is_dir() and any(Path(cfg.paths.tables).glob("diag_*_ZN.csv"))
+
+
+def test_report_is_generated_from_tables(tiny, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    cfg, _ = tiny
+    readme = tmp_path / "README.md"
+    readme.write_text(f"# x\n\n{README_START}\nold\n{README_END}\n\ntail\n")
+    path = build_report(cfg, readme)
+    text = path.read_text()
+    for heading in ("## 1. Question", "## 4. Results", "## 6. How wrong", "## 7. Limitations"):
+        assert heading in text
+    assert "synthetic" in text.lower()
+    assert "upper bound" in text.lower()
+    assert "0.0 ticks" not in text  # numbers are formatted, never left empty
+    new = readme.read_text()
+    assert "old" not in new and "tail" in new and "ticks per contract" in new
+    assert (cfg.paths.figures / "headline.png").exists()

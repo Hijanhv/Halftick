@@ -6,7 +6,7 @@ build-features  quality checks, book, features and targets for every stored day
 train           walk-forward direction models, metrics, reliability plots
 simulate        queue-aware execution simulation across the sensitivity grid
 diagnose        breakdowns, signal decay, stability, queue-model validation
-report          descriptive stats (REPORT.md generation: not built yet)
+report          REPORT.md, figures and the README results block
 replay          event-driven replay with Prometheus metrics (optionally real time)
 all             synth -> build-features -> train -> simulate -> diagnose -> report
 """
@@ -158,14 +158,14 @@ def diagnose(instrument: InstOpt = "ZN") -> None:
 
 @app.command()
 def report() -> None:
-    """Descriptive statistics of the stored days. (REPORT.md generation is not built yet.)"""
+    """Descriptive statistics, reports/REPORT.md and the README results block."""
     from halftick.diagnostics.breakdowns import descriptive
+    from halftick.report import build_report
 
     c = cfg()
     descriptive(c, [c.primary_instrument, c.comparison_instrument])
-    log.info(
-        "report_done", tables=str(c.paths.tables), note="REPORT.md generation not implemented yet"
-    )
+    path = build_report(c)
+    log.info("report_written", path=str(path))
 
 
 @app.command()

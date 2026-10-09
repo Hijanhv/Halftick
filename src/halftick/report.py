@@ -201,8 +201,9 @@ def plot_headline(cfg: Settings, instruments: list[str]) -> Path | None:
             ax.text(max(m, 0) + 0.03, k, f"{m:+.3f}", va="center", fontsize=9, color=plots.TEXT)
         ax.axvline(0, color=plots.TEXT_2, lw=1)
         ax.set_yticks(range(len(order)), [STRATEGY_LABEL[s] for s in order])
-        ax.invert_yaxis()
-        ax.set_xlabel("mean cost, ticks per contract vs arrival mid (lower is better)")
+        # Explicit limits instead of invert_yaxis(): with sharey=True, inverting
+        # each axis would flip the shared axis back.
+        ax.set_ylim(len(order) - 0.5, -0.5)
         ax.set_title(f"Synthetic {inst}")
         ax.grid(axis="y", visible=False)
     h = cfg.sim.headline
@@ -210,6 +211,11 @@ def plot_headline(cfg: Settings, instruments: list[str]) -> Path | None:
         f"Execution cost by strategy ({h.queue_model} queue, {h.latency_ms} ms latency, "
         f"{h.deadline_s} s deadline; bars show 95% day-block bootstrap CIs)",
         fontsize=11,
+    )
+    fig.supxlabel(
+        "mean cost, ticks per contract vs arrival mid (lower is better)",
+        fontsize=10,
+        color=plots.TEXT_2,
     )
     fig.tight_layout()
     return plots.save(fig, cfg.paths.figures / "headline.png")
@@ -222,7 +228,7 @@ def _direction_table(cfg: Settings, instrument: str) -> str:
     rows = []
     for sample, label in (
         ("out_of_sample", "out of sample"),
-        ("in_sample", "in sample"),
+        ("in_sample", "in sample (avg per fold)"),
         ("release_windows_oos", "release windows, OOS"),
     ):
         for r in s.filter(pl.col("sample") == sample).iter_rows(named=True):
@@ -243,6 +249,50 @@ def _direction_table(cfg: Settings, instrument: str) -> str:
         orient="row",
     )
     return _md_table(df)
+
+
+def _direction_takeaways(cfg: Settings, instrument: str) -> str:
+    """Plain sentences derived from the direction tables."""
+    s = _t(cfg, f"direction_summary_{instrument}.csv")
+    t = _t(cfg, f"direction_tests_{instrument}.csv")
+    if s is None:
+        return ""
+
+    def auc(model: str, sample: str) -> float:
+        r = s.filter((pl.col("model") == model) & (pl.col("sample") == sample))
+        return float(r["auc"][0]) if r.height else float("nan")
+
+    out = []
+    lg, a, b = (
+        auc("lightgbm", "out_of_sample"),
+        auc("baseline_a", "out_of_sample"),
+        auc("baseline_b", "out_of_sample"),
+    )
+    line = f"- Out of sample, LightGBM's AUC is {_f(lg)} against {_f(a)} for the imbalance lookup and {_f(b)} for logistic regression"
+    if t is not None:
+        r = t.filter((pl.col("model") == "lightgbm") & (pl.col("vs") == "baseline_a"))
+        if r.height:
+            line += (
+                f" (log-loss improvement over the lookup: Newey-West t = {_f(r['t_stat'][0], 2)})"
+            )
+    out.append(
+        line
+        + ". The gain over the one-feature lookup table is real but small: most of the signal is queue imbalance."
+    )
+    gap = auc("lightgbm", "in_sample") - lg
+    out.append(
+        f"- LightGBM's in-sample AUC is {_f(gap)} higher than out of sample, so it overfits noticeably; the baselines barely do ({_f(auc('baseline_a', 'in_sample') - a)} for the lookup)."
+    )
+    rl, ra, rb = (
+        auc("lightgbm", "release_windows_oos"),
+        auc("baseline_a", "release_windows_oos"),
+        auc("baseline_b", "release_windows_oos"),
+    )
+    if not np.isnan(rl) and rl < max(ra, rb):
+        out.append(
+            f"- **Failure mode:** inside macro-release windows LightGBM is worse than the simple baselines (AUC {_f(rl)} vs {_f(ra)} and {_f(rb)}). A likely reason: release periods are rare in the training days, and the more flexible model generalises worse to them than the simple ones."
+        )
+    return "\n".join(out)
 
 
 def _tests_table(cfg: Settings, instrument: str) -> str:
@@ -424,10 +474,33 @@ def _decay(cfg: Settings, instrument: str) -> str:
     if d is None:
         return ""
     w = d.pivot(on="signal", index="horizon", values="auc", maintain_order=True)
-    return _md_table(
-        w.select(pl.col("horizon"), *[pl.col(c).round(4) for c in w.columns if c != "horizon"]),
-        ["horizon", "AUC queue imbalance", "AUC LightGBM"],
+    share = (
+        d.group_by("horizon", maintain_order=True).agg(pl.col("moved_share").first())
+        if "moved_share" in d.columns
+        else None
     )
+    rows = []
+    for r in w.iter_rows(named=True):
+        moved = ""
+        if share is not None:
+            v = share.filter(pl.col("horizon") == r["horizon"])["moved_share"][0]
+            moved = f"{v:.1%}"
+        rows.append([r["horizon"], moved, _f(r["imbalance"], 4), _f(r["lightgbm"], 4)])
+    table = _md_table(
+        pl.DataFrame(
+            rows,
+            schema=["horizon", "rows where the mid moved", "AUC queue imbalance", "AUC LightGBM"],
+            orient="row",
+        )
+    )
+    note = (
+        "\n\nHow to read this: the clock-time rows only score moments where the mid actually moved within the horizon. "
+        "Over 1 second those are mostly moments where one queue is about to empty, which is exactly when imbalance is most "
+        "informative, so the short-horizon AUC is high on a small, selected subset. It is a selection effect, not look-ahead "
+        "(features use only past data, and this is tested). The fair comparison across horizons is how the AUC falls as "
+        "the horizon grows and more ordinary moments are included."
+    )
+    return table + note
 
 
 def _queue_validation(cfg: Settings, instrument: str) -> str:
@@ -577,7 +650,7 @@ def day_counts(cfg: Settings, instrument: str) -> tuple[int, int]:
     return generated, used
 
 
-def build_report(cfg: Settings) -> Path:
+def build_report(cfg: Settings, readme: Path | None = Path("README.md")) -> Path:
     zn, es = cfg.primary_instrument, cfg.comparison_instrument
     plot_headline(cfg, [zn, es])
     days = {i: day_counts(cfg, i) for i in (zn, es)}
@@ -650,6 +723,8 @@ Headline cell for {zn} ({hd.queue_model} queue, {hd.latency_ms} ms, {hd.deadline
 
 {_direction_table(cfg, zn)}
 
+{_direction_takeaways(cfg, zn)}
+
 Newey-West tests of the per-row log-loss difference (negative means the first model is better):
 
 {_tests_table(cfg, zn)}
@@ -683,6 +758,8 @@ Direction-model AUC by regime:
 {_robustness(cfg, es)}
 
 {_direction_table(cfg, es)}
+
+{_direction_takeaways(cfg, es)}
 
 {fig(f"sensitivity_{es}")}
 
@@ -719,7 +796,8 @@ With real mbp data the queue position is unknown and has to be assumed. The synt
     path = cfg.paths.reports / "REPORT.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
-    update_readme(cfg, Path("README.md"))
+    if readme is not None:
+        update_readme(cfg, readme)
     return path
 
 

@@ -21,8 +21,11 @@ from sklearn.metrics import roc_auc_score
 
 from halftick import plots
 from halftick.config import Settings
-from halftick.data.pipeline import analysis_days, load_features
+from halftick.data.pipeline import analysis_days, load_features, roll_table
+from halftick.log import get_logger
 from halftick.sim.summary import paired, trade_log_glob
+
+log = get_logger(__name__)
 
 BUCKET_ORDER = {
     "tod": ["open", "midday", "close"],
@@ -156,15 +159,26 @@ def signal_decay(cfg: Settings, instrument: str) -> pl.DataFrame:
     for label, col in horizons:
         g = pred.filter(pl.col(col).is_not_null() & pl.col(col).is_not_nan())
         y = g[col].to_numpy()
+        total = len(y)
         if col != "next_dir":
+            # Clock-time horizons only score rows where the mid actually moved.
+            # Over short horizons those are mostly rows where a queue is about
+            # to empty, which is when imbalance is most informative.
             keep = y != 0
             g, y = g.filter(pl.Series(keep)), (y[keep] > 0).astype(float)
+        moved_share = len(y) / total if total else float("nan")
         for name, score in (
             ("imbalance", g["imbalance"].to_numpy()),
             ("lightgbm", g["p_lightgbm"].to_numpy()),
         ):
             rows.append(
-                {"horizon": label, "signal": name, "n": len(y), "auc": roc_auc_score(y, score)}
+                {
+                    "horizon": label,
+                    "signal": name,
+                    "n": len(y),
+                    "moved_share": moved_share,
+                    "auc": roc_auc_score(y, score),
+                }
             )
     out = pl.DataFrame(rows)
     out.write_csv(cfg.paths.tables / f"diag_signal_decay_{instrument}.csv")
@@ -263,16 +277,31 @@ def queue_model_validation(cfg: Settings, instrument: str) -> pl.DataFrame:
     return out
 
 
+def expected_analysis_days(cfg: Settings, instrument: str) -> int | None:
+    """Number of non-roll days according to the daily volume table, if present."""
+    table = roll_table(cfg, instrument)
+    return None if table is None else int((~table["is_roll"]).sum())
+
+
 def descriptive_instrument(cfg: Settings, instrument: str) -> pl.DataFrame:
     """Per-day book statistics for one instrument, plus a queue-size sample for the figure.
 
     Saved per instrument so the processed days can be deleted afterwards
     (they are reproducible from the seed) without losing the statistics.
     """
+    days = analysis_days(cfg, instrument)
+    table = cfg.paths.tables / f"descriptive_{instrument}.csv"
+    expected = expected_analysis_days(cfg, instrument)
+    if table.exists() and expected is not None and len(days) < expected:
+        # Processed days were deleted to save disk; keep the complete table.
+        log.warning(
+            "descriptive_kept", instrument=instrument, days_found=len(days), expected=expected
+        )
+        return pl.read_csv(table)
     rows = []
     queues = []
     cols = ["in_session", "spread", "bid_queue", "ask_queue", "mid", "action", "ts_event"]
-    for d in analysis_days(cfg, instrument):
+    for d in days:
         f = load_features(cfg, instrument, d, columns=cols).filter("in_session")
         mid = f["mid"].to_numpy()
         changes = int(np.sum(np.diff(mid) != 0))
