@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import re
 from pathlib import Path
 
@@ -650,7 +651,12 @@ def day_counts(cfg: Settings, instrument: str) -> tuple[int, int]:
     return generated, used
 
 
-def build_report(cfg: Settings, readme: Path | None = Path("README.md")) -> Path:
+def build_report(cfg: Settings, readme: Path | None = None) -> Path:
+    """Write REPORT.md and update the README results block.
+
+    The README defaults to cfg.paths.readme, so overriding the output paths in
+    config also redirects the README and never touches the repo copy by accident.
+    """
     zn, es = cfg.primary_instrument, cfg.comparison_instrument
     plot_headline(cfg, [zn, es])
     days = {i: day_counts(cfg, i) for i in (zn, es)}
@@ -796,16 +802,24 @@ With real mbp data the queue position is unknown and has to be assumed. The synt
     path = cfg.paths.reports / "REPORT.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
-    if readme is not None:
-        update_readme(cfg, readme)
+    update_readme(cfg, readme if readme is not None else cfg.paths.readme)
     return path
 
 
-def readme_block(cfg: Settings) -> str:
+def _rel(target: Path, readme: Path | None) -> str:
+    """Link to target as seen from the README's folder (POSIX separators)."""
+    base = readme.resolve().parent if readme is not None else Path.cwd()
+    return Path(os.path.relpath(target.resolve(), base)).as_posix()
+
+
+def readme_block(cfg: Settings, readme: Path | None = None) -> str:
     zn, es = cfg.primary_instrument, cfg.comparison_instrument
     lines = [README_START, "", "## Results (synthetic data)", ""]
     if (cfg.paths.figures / "headline.png").exists():
-        lines += ["![Execution cost by strategy](reports/figures/headline.png)", ""]
+        lines += [
+            f"![Execution cost by strategy]({_rel(cfg.paths.figures / 'headline.png', readme)})",
+            "",
+        ]
     lines += [f"- {headline_sentence(cfg, zn)}", f"- {headline_sentence(cfg, es)}", ""]
     for inst in (zn, es):
         s = _t(cfg, f"direction_summary_{inst}.csv")
@@ -819,7 +833,7 @@ def readme_block(cfg: Settings) -> str:
             )
     lines += [
         "",
-        "Full write-up with method, regime breakdowns, queue-model validation and limitations: [reports/REPORT.md](reports/REPORT.md).",
+        f"Full write-up with method, regime breakdowns, queue-model validation and limitations: [{_rel(cfg.paths.reports / 'REPORT.md', readme)}]({_rel(cfg.paths.reports / 'REPORT.md', readme)}).",
         "",
         README_END,
     ]
@@ -830,7 +844,7 @@ def update_readme(cfg: Settings, path: Path) -> None:
     if not path.exists():
         return
     text = path.read_text()
-    block = readme_block(cfg)
+    block = readme_block(cfg, path)
     if README_START in text and README_END in text:
         text = re.sub(
             re.escape(README_START) + r".*?" + re.escape(README_END),

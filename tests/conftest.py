@@ -30,6 +30,7 @@ def _test_config(tmp_path: Path) -> Settings:
         f"paths.tables={tmp_path}/reports/tables",
         f"paths.trade_logs={tmp_path}/reports/trade_logs",
         f"paths.data_quality={tmp_path}/reports/data_quality",
+        f"paths.readme={tmp_path}/README.md",
         f"databento.spend_ledger={tmp_path}/raw/spend_ledger.json",
         "synthetic.generate_from='08:25'",
         "synthetic.generate_to='08:45'",

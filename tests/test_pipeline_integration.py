@@ -5,6 +5,7 @@ Checks plumbing and invariants that must hold for any data, not result values.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import duckdb
@@ -34,6 +35,7 @@ def tiny(tmp_path_factory: pytest.TempPathFactory):  # type: ignore[no-untyped-d
         f"paths.tables={t}/reports/tables",
         f"paths.trade_logs={t}/reports/trade_logs",
         f"paths.data_quality={t}/reports/data_quality",
+        f"paths.readme={t}/README.md",
         "synthetic.generate_from='08:20'",
         "synthetic.generate_to='09:00'",
         "session.end='08:58'",
@@ -147,3 +149,18 @@ def test_report_is_generated_from_tables(tiny, tmp_path: Path) -> None:  # type:
     new = readme.read_text()
     assert "old" not in new and "tail" in new and "ticks per contract" in new
     assert (cfg.paths.figures / "headline.png").exists()
+
+
+def test_report_writes_only_the_configured_readme(tiny) -> None:  # type: ignore[no-untyped-def]
+    cfg, _ = tiny
+    repo_readme = ROOT / "README.md"
+    before = repo_readme.read_bytes()
+    target = cfg.paths.readme
+    target.write_text(f"# x\n\n{README_START}\n{README_END}\n")
+    build_report(cfg)
+    assert repo_readme.read_bytes() == before, "report touched the repository README"
+    block = target.read_text()
+    links = re.findall(r"\]\(([^)]+)\)", block)
+    assert links, "results block has no links"
+    for link in links:
+        assert (target.parent / link).exists(), f"broken link {link}"

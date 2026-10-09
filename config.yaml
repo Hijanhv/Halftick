@@ -14,6 +14,7 @@ paths:
   tables: reports/tables
   trade_logs: reports/trade_logs
   data_quality: reports/data_quality
+  readme: README.md           # `halftick report` rewrites the results block in this file
 
 instruments:
   ZN:

@@ -28,6 +28,7 @@ class Paths(_Strict):
     tables: Path
     trade_logs: Path
     data_quality: Path
+    readme: Path
 
 
 class InstrumentSpec(_Strict):
