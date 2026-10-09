@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # CI must never need market data or an API key: tests use synthetic data only.
+      DATABENTO_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: Lint
+        run: |
+          uv run ruff check src tests
+          uv run ruff format --check src tests
+
+      - name: Type check
+        run: uv run mypy
+
+      - name: Tests (numba compiled)
+        run: uv run pytest -q
+
+      - name: Coverage (numba JIT off so kernels are measured)
+        env:
+          NUMBA_DISABLE_JIT: "1"
+        run: >
+          uv run pytest -q --cov=halftick --cov-report=term
+          --cov-fail-under=90
